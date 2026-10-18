@@ -1,0 +1,17 @@
+server:
+  port: ${SERVER_PORT:8085}
+
+spring:
+  application:
+    name: officyna-billing-service
+
+mercadopago:
+  api-base-url: ${MERCADOPAGO_API_BASE_URL:https://api.mercadopago.com}
+  access-token: ${MERCADOPAGO_ACCESS_TOKEN:}
+  webhook-secret: ${MERCADOPAGO_WEBHOOK_SECRET:}
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /api-docs
