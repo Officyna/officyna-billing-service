@@ -1,57 +1,100 @@
-# officyna-billing-service (POC)
+# officyna-billing-service
 
-POC de integração com o Mercado Pago (Checkout Transparente / Orders API) para o
-`officyna-billing-service`. Cobre apenas os dois fluxos que dependem do Mercado Pago —
-checkout Pix e checkout com cartão de crédito — mais o webhook de confirmação de pagamento.
+Microsserviço financeiro e de pagamentos da Officyna — orçamentos, faturamento, conciliação e
+integração com o Mercado Pago (Checkout Transparente / Orders API).
 
-**Fora do escopo desta POC** (fica para a próxima etapa, junto com o restante do TASK-02):
-persistência relacional (Postgres/Flyway), geração de orçamento, aprovação/rejeição de OS.
-O status do pagamento aqui fica em memória (`PaymentStatusStore`), só para validar a integração.
+## Arquitetura
+
+Comunicação híbrida:
+
+- **Assíncrona (SQS/SNS)** — geração do orçamento inicial e notificação final de pagamento.
+- **Síncrona (REST)** — aprovação final + geração do checkout, porque quem chama precisa do
+  QR Code/dado do pagamento imediatamente pra agir em cima.
+- **Webhook (REST)** — o Mercado Pago chama essa URL direto pela internet; é o único endpoint
+  que não dá pra trocar por mensageria, é o provedor externo quem decide como notifica.
+
+### Fluxo
+
+1. `os-service` publica **`eventGeneratePayment`** (fila `officyna-billing-requests`) com os
+   `labors`/`supplies` levantados no diagnóstico.
+2. Billing-service consome, salva os itens com situação `PENDING_APPROVAL`, calcula ISS (sobre
+   mão de obra) e ICMS (sobre peças/insumos), publica **`eventBudgetGenerated`** (fila
+   `officyna-billing-responses`) com os totais.
+3. Depois que o cliente aprova (fora deste serviço), `os-service` chama **síncrono**
+   `POST /api/v1/checkout/create` só com os itens aprovados — billing-service marca o resto como
+   `REJECTED` (preserva histórico), recalcula o total, gera a cobrança no Mercado Pago (Pix QR
+   Code ou token de cartão já tokenizado por quem chama) e responde na hora.
+4. O Mercado Pago confirma o pagamento via **webhook** (`POST /api/v1/payments/webhook`) —
+   valida assinatura HMAC-SHA256, consulta o status real, mapeia pra `PAID`/`WAITING_PAYMENT`/
+   `FAILED`.
+5. Quando `PAID`, publica **`eventOrderPaid`** no tópico SNS `officyna-billing-order-paid` —
+   `os-service` e `production-service` consomem em paralelo, cada um na própria fila inscrita.
+
+Billing-service é dono só dos próprios recursos de mensageria (as 2 filas que usa + o tópico que
+publica), criados de forma idempotente (`CreateQueue`/`CreateTopic` — se já existe, só devolve).
+Quem quiser escutar o tópico cuida da própria fila/inscrição.
 
 ## Stack
 
-Java 21, Spring Boot 4.0.3, Maven. Sem JDK/Maven local? Use o container oficial:
+Java 21, Spring Boot 4.0.3, Maven, Postgres/Flyway, AWS SDK v2 (SQS/SNS). Sem JDK/Maven local?
+Use o container oficial:
 
 ```bash
 docker run --rm -v "$PWD":/app -w /app -v maven-repo-cache:/root/.m2 \
-  maven:3.9.9-eclipse-temurin-21 mvn test
+  maven:3.9.9-eclipse-temurin-21 mvn verify
 ```
 
-## Rodando localmente
-
-Precisa de uma aplicação de teste no [painel do Mercado Pago](https://www.mercadopago.com.br/developers/panel)
-(solução "Checkout Transparente" → tipo de API "API de Orders"). Nas **Credenciais de teste**,
-pegue o Access Token; em **Contas de teste**, use um usuário "Comprador" (não dá pra pagar com
-a própria conta vendedora — erro `invalid_users_involved`). O e-mail do comprador segue o padrão
-`test_user_<USER_ID>@testuser.com`.
+## Rodando localmente (Postgres + LocalStack + app)
 
 ```bash
-docker run --rm --name officyna-billing-poc \
-  -p 8085:8085 \
-  -e MERCADOPAGO_ACCESS_TOKEN="<seu access token de teste>" \
-  -e MERCADOPAGO_WEBHOOK_SECRET="<secret do painel Webhooks, ou qualquer valor para simulação local>" \
-  -v "$PWD":/app -w /app -v maven-repo-cache:/root/.m2 \
-  maven:3.9.9-eclipse-temurin-21 mvn -q spring-boot:run
+MERCADOPAGO_ACCESS_TOKEN="<seu access token de teste>" \
+MERCADOPAGO_WEBHOOK_SECRET="<secret do painel Webhooks>" \
+docker compose up -d
 ```
 
-Swagger UI em `http://localhost:8085/swagger-ui.html`.
+Sobe Postgres (Flyway migra o schema automaticamente), LocalStack (SQS/SNS — `localstack-init/
+init-sqs.sh` cria as filas/tópico, mais uma fila de teste inscrita no tópico pra inspecionar
+localmente) e a aplicação em `http://localhost:8086` (porta do host; o container escuta 8080 —
+8086 é só pra não colidir com outra coisa já usando 8080 na sua máquina, ajuste à vontade).
 
-## Checkout Pix
+Swagger UI em `http://localhost:8086/swagger-ui.html`. Health check em `/actuator/health`.
+
+### Testar a mensageria manualmente
 
 ```bash
-curl -X POST http://localhost:8085/api/v1/payments/checkout/pix \
+QUEUE_URL=$(docker exec officyna-billing-localstack awslocal sqs get-queue-url --queue-name officyna-billing-requests --query QueueUrl --output text)
+docker exec officyna-billing-localstack awslocal sqs send-message --queue-url "$QUEUE_URL" --message-body '{
+  "correlationId": "a1b2c3d4-e5f6-7890-1234-56789abcdef0",
+  "serviceOrderId": "6724a1b8e4b0123456789abc",
+  "labors": [{"laborId": "lab_1", "description": "Troca de pastilha de freio", "amount": 150.00, "situation": "PENDING_APPROVAL"}],
+  "supplies": [{"supplyId": "sup_1", "description": "Jogo de pastilhas Bosch", "amount": 180.00, "situation": "PENDING_APPROVAL"}]
+}'
+```
+
+O app consome em até 5s (polling), calcula o orçamento e publica `eventBudgetGenerated` em
+`officyna-billing-responses` — dá pra ler com `awslocal sqs receive-message --queue-url ...`.
+
+### Checkout
+
+```bash
+curl -X POST http://localhost:8086/api/v1/checkout/create \
   -H 'Content-Type: application/json' \
-  -d '{"amount": 50.00, "payerEmail": "test_user_<BUYER_USER_ID>@testuser.com"}'
+  -d '{
+    "correlationId": "a1b2c3d4-e5f6-7890-1234-56789abcdef0",
+    "serviceOrderId": "6724a1b8e4b0123456789abc",
+    "paymentMethod": "PIX",
+    "payerEmail": "test_user_<BUYER_USER_ID>@testuser.com",
+    "approvedLabors": [{"laborId": "lab_1", "amount": 150.00}],
+    "approvedSupplies": [{"supplyId": "sup_1", "amount": 180.00}]
+  }'
 ```
 
-Retorna `qrCode` (copia-e-cola) e `qrCodeBase64` (imagem).
-
-## Checkout cartão
-
-Gere um token de cartão de teste direto via API (sem precisar do SDK JS no browser — útil
-para testes automatizados). Números de cartão de teste e os prefixos de nome do titular que
-simulam cada status (`APRO` = aprovado, `OTHE` = erro geral, `FUND` = saldo insuficiente etc.)
-estão em **Cartões de teste** no painel.
+Pra cartão (`paymentMethod: CREDIT_CARD` ou `DEBIT_CARD`), inclua `cardToken` (gerado via
+`POST /v1/card_tokens` do Mercado Pago, ver abaixo), `cardBrand` (ex.: `"master"`) e
+`installments`. `cardToken`/`cardBrand`/`installments` não estavam no desenho original do
+documento da weekly (só tinha o exemplo de Pix) — são extensões necessárias pro Checkout
+Transparente de cartão funcionar, já que a tokenização acontece em quem chama, billing-service
+nunca vê o cartão cru.
 
 ```bash
 curl -X POST "https://api.mercadopago.com/v1/card_tokens?public_key=<sua public key de teste>" \
@@ -65,96 +108,66 @@ curl -X POST "https://api.mercadopago.com/v1/card_tokens?public_key=<sua public 
   }'
 ```
 
-```bash
-curl -X POST http://localhost:8085/api/v1/payments/checkout/card \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "amount": 50.00,
-    "payerEmail": "test_user_<BUYER_USER_ID>@testuser.com",
-    "cardToken": "<id retornado acima>",
-    "paymentMethodId": "master",
-    "installments": 1
-  }'
-```
-
-## Webhook
+### Webhook
 
 Mercado Pago assina a notificação com HMAC-SHA256 no header `x-signature`
 (`ts=<timestamp>,v1=<hash>`), calculado sobre o manifest `id:{data.id};request-id:{x-request-id};ts:{ts};`.
-Para a Orders API, `data.id` é o **id do pedido** (não um id de pagamento legado — o endpoint
-`/v1/payments/{id}` não existe para pedidos criados via Orders API, só `/v1/orders/{id}`), e vem
-como **query param** na própria URL do webhook (`?data.id=...&type=payment`), não só no corpo.
-
-Confirmado contra uma notificação real (via ngrok + "Simular notificação" do painel): `data.id`
-entra no manifest **exatamente como veio** — a documentação do Mercado Pago diz que deveria ser
-lowercase quando alfanumérico, mas isso não bateu com o id de pedido real (`ORDTST...`), que tem
-maiúsculas. Forçar lowercase quebra a validação.
-
-Para simular localmente sem expor a porta publicamente:
-
-```python
-import hmac, hashlib, time
-
-data_id = "<order id>"
-request_id = "sim-req-001"
-ts = str(int(time.time()))
-secret = "<MERCADOPAGO_WEBHOOK_SECRET usado ao subir a app>"
-
-manifest = f"id:{data_id};request-id:{request_id};ts:{ts};"
-v1 = hmac.new(secret.encode(), manifest.encode(), hashlib.sha256).hexdigest()
-print(f"x-signature: ts={ts},v1={v1}")
-```
+`data.id` é o **id do pedido** (Orders API — `/v1/payments/{id}` não existe pra pedidos criados
+via Orders API, só `/v1/orders/{id}`), vem como **query param** na própria URL do webhook
+(`?data.id=...&type=payment`), e entra no manifest **exatamente como veio** (a documentação do
+Mercado Pago diz que deveria ser lowercase quando alfanumérico, mas isso não bateu com o id de
+pedido real, que tem maiúsculas — confirmado contra uma notificação real via ngrok).
 
 ```bash
-curl -X POST "http://localhost:8085/api/v1/payments/webhook?data.id=<order id>&type=payment" \
+curl -X POST "http://localhost:8086/api/v1/payments/webhook?data.id=<order id>&type=payment" \
   -H 'Content-Type: application/json' \
   -H 'x-signature: ts=...,v1=...' \
   -H 'x-request-id: sim-req-001' \
   -d '{"type":"payment","action":"order.updated","data":{"id":"<order id>"}}'
 ```
 
-Validado contra o callback real do Mercado Pago via `ngrok http 8085` + URL configurada em
-**Webhooks → Configurar notificações** no painel, usando o secret real de lá. O painel também
-tem um botão **"Simular notificação"** que dispara uma chamada real (assinada de verdade) pra
-URL configurada, sem precisar completar um pagamento de verdade — só é preciso trocar o "Data ID"
-pelo id de um pedido que o `PaymentStatusStore` em memória já conheça (criado numa chamada
-anterior a `/checkout/pix` ou `/checkout/card` nessa mesma instância da aplicação).
+## Notas de implementação (Spring Boot 4 é recente — várias peças do ecossistema ainda não acompanharam)
 
-## Consultar status local
+- **Jackson 3** (`tools.jackson`, não `com.fasterxml.jackson`) é o padrão nos conversores HTTP —
+  os gateways usam `tools.jackson.databind.JsonNode`/`ObjectMapper`.
+- **Sem Spring Cloud AWS**: não existe versão de `spring-cloud-aws-starter-sqs`/`-sns`
+  compatível com Spring Boot 4 no Maven Central ainda (a mais recente, 3.4.0, é pro trem do
+  Boot 3.4.x). Mensageria usa `software.amazon.awssdk:sqs`/`sns` (SDK v2 puro) com polling via
+  `@Scheduled`, mesmo padrão que o `officyna-os-service` já usa na branch dele.
+- **Sem autoconfiguração do Flyway**: o Boot 4.0.3 modularizou a autoconfiguração (existem
+  `spring-boot-hibernate`/`spring-boot-jpa`/`spring-boot-mongodb`, mas nenhum
+  `spring-boot-flyway`) — sem isso, o JPA tentava validar o schema antes da migração rodar.
+  `infrastructure/config/FlywayConfig` conecta o Flyway na mão: define o próprio bean
+  `DataSource` e roda `flyway.migrate()` como efeito colateral da criação dele, garantindo a
+  ordem certa só com injeção de dependência normal (uma tentativa anterior via
+  `BeanFactoryPostProcessor`/`@DependsOn` esbarrou em resolução prematura do FactoryBean do
+  JPA — ver histórico do arquivo se for mexer nisso).
+- Chamadas à Orders API usam `RestClient` com corpo montado como `Map` aninhado em vez de DTOs
+  tipados — o payload da Orders API tem muitos campos opcionais que não valem a pena modelar.
+- `serviceOrderId` é tratado como `String` (não `UUID`) em todo o schema/domínio — o `os-service`
+  usa MongoDB, o id da O.S. é um ObjectId (formato `6724a1b8e4b0123456789abc`), não um UUID.
+
+## Testando
 
 ```bash
-curl http://localhost:8085/api/v1/payments/{orderId}
+docker run --rm -v "$PWD":/app -w /app -v maven-repo-cache:/root/.m2 \
+  maven:3.9.9-eclipse-temurin-21 mvn verify
 ```
 
-## Notas de implementação
+Testes unitários (JUnit 5 + Mockito) cobrindo o cálculo de orçamento/impostos, a aprovação de
+itens, os gateways de persistência e o fluxo de webhook. Gate do Jacoco em 80% de cobertura de
+linha (exclui camadas finas: `api`, `config`, `messaging`, entidades JPA).
 
-- Spring Boot 4 / Spring Framework 7 trocou o Jackson clássico (`com.fasterxml.jackson`) pelo
-  Jackson 3 (`tools.jackson`) nos conversores HTTP padrão — os gateways usam
-  `tools.jackson.databind.JsonNode`, não a classe antiga.
-- Chamadas à Orders API usam `RestClient` com corpo montado como `Map` aninhado em vez de DTOs
-  tipados — o payload da Orders API tem muitos campos opcionais que não valem a pena modelar
-  numa POC.
+## Pontos em aberto
 
-## Próxima etapa (arquitetura em definição com o time)
-
-O fluxo completo do billing-service (diagrama de sequência alinhado na weekly) é guiado por
-mensageria, não por REST público:
-
-- Consome `eventGeneratePayment` (publicado pelo `production-service` logo após o diagnóstico
-  ser finalizado, com os `labors`/`supplies` aprovados) → calcula o orçamento inicial → publica
-  `eventBugetGenerated` (sem link de pagamento ainda).
-- Depois que o cliente aprova a O.S, consome `eventGeneratePayment` de novo (dessa vez publicado
-  pelo `os-service`) → recalcula o orçamento → só agora integra com o Mercado Pago pra gerar o
-  link de pagamento → publica `eventBugetGenerated` novamente, agora com `paymentLink`.
-- O webhook do Mercado Pago (já implementado neste repo) é o ponto de entrada da notificação de
-  pagamento. Ao receber, publica (via **SNS**) `topicAprovacao {serviceOrderId, statusPayment}`,
-  que `os-service` e `production-service` consomem em paralelo (fanout).
-
-Esse contrato de mensageria ainda não está implementado neste repositório — os nomes de evento
-acima vêm do diagrama de sequência compartilhado pelo time, e divergem (em nomenclatura) do que
-já está esboçado em branches de feature dos serviços vizinhos:
-`officyna-os-service` (branch `181/feat/implementar-comunicacao-assincrona`, usa AWS SDK puro,
-espera um `PaymentConfirmedEvent` na própria fila `os-service-queue`) e
-`officyna-execution-production` (branch `feature/configurando-repo`, usa Spring Cloud AWS,
-já define `billing-request-queue`/`billing-response-queue` com `ExecutionEvent`/
-`BillingDecisionEvent`). Alinhar isso é trabalho da próxima rodada, não desta POC.
+- Reconciliar `BudgetStatus` (nível orçamento) com `ItemSituation`+`PaymentStatus` — avaliar se
+  `BudgetStatus` é redundante.
+- Alíquotas de ISS/ICMS (`billing.tax.iss-rate`/`icms-rate`) são percentuais fixos
+  configuráveis, sem regra fiscal real por município/estado (fora de escopo do projeto).
+- `POST /checkout/create` ainda não é idempotente — uma chamada em duplicidade (retry do
+  os-service) geraria dois checkouts pro mesmo orçamento.
+- Infra real na AWS (RDS Postgres, filas/tópico de verdade) ainda não provisionada — o pipeline
+  de CI/CD já espera um parâmetro SSM (`/officyna/billing-db/endpoint`) que ainda não existe.
+- Contrato de mensageria com `officyna-os-service`/`officyna-execution-production` ainda não
+  reconciliado entre os três serviços — cada um tem seu próprio rascunho em branches não
+  mergeadas; este documento é a fonte da verdade pro lado do billing-service.
