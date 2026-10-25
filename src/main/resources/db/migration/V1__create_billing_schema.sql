@@ -12,7 +12,10 @@ CREATE TABLE budgets (
     status                VARCHAR(20) NOT NULL CHECK (status IN ('DRAFT','PENDING_APPROVAL','APPROVED','REJECTED','EXPIRED')),
     created_at            TIMESTAMP NOT NULL DEFAULT now()
 );
-CREATE INDEX idx_budgets_order_id ON budgets (order_id);
+-- UNIQUE, não só índice: um orçamento por OS. Sem isso, duas mensagens eventGeneratePayment
+-- pro mesmo serviceOrderId (retry, ou reprocessamento) criam linhas duplicadas e
+-- findByOrderId() quebra com NonUniqueResultException.
+CREATE UNIQUE INDEX idx_budgets_order_id ON budgets (order_id);
 
 CREATE TABLE budget_items (
     id                 UUID PRIMARY KEY,
