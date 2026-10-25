@@ -4,11 +4,41 @@ server:
 spring:
   application:
     name: officyna-billing-service
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/officyna_billing?user=officyna&password=officyna}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  # Sem bloco "flyway:" aqui de propósito — Spring Boot 4.0.3 não tem autoconfiguração pro
+  # Flyway ainda (ver infrastructure/config/FlywayConfig), essas chaves ficariam inertes.
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
 
 mercadopago:
   api-base-url: ${MERCADOPAGO_API_BASE_URL:https://api.mercadopago.com}
   access-token: ${MERCADOPAGO_ACCESS_TOKEN:}
   webhook-secret: ${MERCADOPAGO_WEBHOOK_SECRET:}
+
+billing:
+  tax:
+    iss-rate: ${BILLING_ISS_RATE:0.05}
+    icms-rate: ${BILLING_ICMS_RATE:0.12}
+
+aws:
+  region: ${AWS_REGION:us-east-1}
+  endpoint: ${AWS_ENDPOINT_URL:}
+  access-key: ${AWS_ACCESS_KEY_ID:test}
+  secret-key: ${AWS_SECRET_ACCESS_KEY:test}
+  sqs:
+    generate-payment-queue: ${AWS_SQS_GENERATE_PAYMENT_QUEUE:officyna-billing-requests}
+    budget-generated-queue: ${AWS_SQS_BUDGET_GENERATED_QUEUE:officyna-billing-responses}
+  sns:
+    order-paid-topic-name: ${AWS_SNS_ORDER_PAID_TOPIC_NAME:officyna-billing-order-paid}
 
 springdoc:
   swagger-ui:

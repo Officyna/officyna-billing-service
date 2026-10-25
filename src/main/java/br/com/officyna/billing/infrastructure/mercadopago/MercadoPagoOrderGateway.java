@@ -42,8 +42,12 @@ public class MercadoPagoOrderGateway {
 		return postOrder(body);
 	}
 
+	/**
+	 * @param cardPaymentMethodType "credit_card" ou "debit_card" — a Orders API usa esse campo
+	 *                              pra diferenciar, não é algo inferido do token.
+	 */
 	public JsonNode createCardOrder(BigDecimal amount, String externalReference, String payerEmail,
-			String cardToken, String paymentMethodId, int installments) {
+			String cardToken, String paymentMethodId, String cardPaymentMethodType, int installments) {
 		String amountStr = amount.toPlainString();
 		Map<String, Object> body = Map.of(
 				"type", "online",
@@ -55,7 +59,7 @@ public class MercadoPagoOrderGateway {
 						"amount", amountStr,
 						"payment_method", Map.of(
 								"id", paymentMethodId,
-								"type", "credit_card",
+								"type", cardPaymentMethodType,
 								"token", cardToken,
 								"installments", installments
 						)

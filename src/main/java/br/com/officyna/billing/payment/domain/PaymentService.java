@@ -1,14 +1,16 @@
 package br.com.officyna.billing.payment.domain;
 
 import br.com.officyna.billing.infrastructure.mercadopago.MercadoPagoOrderGateway;
+import br.com.officyna.billing.infrastructure.messaging.publisher.OrderPaidTopicPublisher;
+import br.com.officyna.billing.infrastructure.messaging.resources.OrderPaidEvent;
 import br.com.officyna.billing.infrastructure.security.WebhookSignatureValidator;
-import tools.jackson.databind.JsonNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import tools.jackson.databind.JsonNode;
 
 import java.math.BigDecimal;
-import java.util.UUID;
+import java.time.Instant;
 
 @Service
 public class PaymentService {
@@ -17,60 +19,67 @@ public class PaymentService {
 
 	private final MercadoPagoOrderGateway gateway;
 	private final WebhookSignatureValidator signatureValidator;
-	private final PaymentStatusStore store;
+	private final PaymentRepository paymentRepository;
+	private final OrderPaidTopicPublisher orderPaidTopicPublisher;
 
 	public PaymentService(MercadoPagoOrderGateway gateway, WebhookSignatureValidator signatureValidator,
-			PaymentStatusStore store) {
+			PaymentRepository paymentRepository, OrderPaidTopicPublisher orderPaidTopicPublisher) {
 		this.gateway = gateway;
 		this.signatureValidator = signatureValidator;
-		this.store = store;
+		this.paymentRepository = paymentRepository;
+		this.orderPaidTopicPublisher = orderPaidTopicPublisher;
 	}
 
-	public PixCheckoutResult checkoutPix(BigDecimal amount, String payerEmail) {
-		String externalReference = UUID.randomUUID().toString();
-		JsonNode order = gateway.createPixOrder(amount, externalReference, payerEmail);
-		String orderId = order.path("id").asText();
-		String status = order.path("status").asText();
-		JsonNode paymentMethod = order.path("transactions").path("payments").path(0).path("payment_method");
-		String qrCode = paymentMethod.path("qr_code").asText(null);
-		String qrCodeBase64 = paymentMethod.path("qr_code_base64").asText(null);
-
-		store.save(new PaymentRecord(orderId, externalReference, "pix", status));
-		return new PixCheckoutResult(orderId, externalReference, status, qrCode, qrCodeBase64);
-	}
-
-	public CardCheckoutResult checkoutCard(BigDecimal amount, String payerEmail, String cardToken,
-			String paymentMethodId, int installments) {
-		String externalReference = UUID.randomUUID().toString();
-		JsonNode order = gateway.createCardOrder(amount, externalReference, payerEmail, cardToken, paymentMethodId, installments);
-		String orderId = order.path("id").asText();
-		String status = order.path("status").asText();
-
-		store.save(new PaymentRecord(orderId, externalReference, "card", status));
-		return new CardCheckoutResult(orderId, externalReference, status);
-	}
-
+	/**
+	 * {@code data.id} do webhook é o id do pedido (Orders API) que já persistimos como
+	 * {@code externalPaymentId} na hora do checkout.
+	 */
 	public boolean handleWebhook(String xSignature, String xRequestId, String type, String dataId) {
 		if (!signatureValidator.isValid(xSignature, xRequestId, dataId)) {
-			log.warn("Rejected webhook call with invalid x-signature (data.id={})", dataId);
+			log.warn("Rejeitado webhook com assinatura inválida (data.id={})", dataId);
 			return false;
 		}
-		if (dataId == null || store.findByOrderId(dataId).isEmpty()) {
-			log.info("Ignoring webhook notification (type='{}') for unknown order id {}", type, dataId);
+		if (dataId == null) {
 			return true;
 		}
 
+		var paymentOpt = paymentRepository.findByExternalPaymentId(dataId);
+		if (paymentOpt.isEmpty()) {
+			log.info("Ignorando webhook (type='{}') de pedido desconhecido {}", type, dataId);
+			return true;
+		}
+		Payment payment = paymentOpt.get();
+
 		JsonNode order = gateway.getOrder(dataId);
-		String status = order.path("status").asText();
-		store.updateStatus(dataId, status);
-		log.info("Order {} updated to status {} via webhook", dataId, status);
+		PaymentStatus newStatus = mapStatus(order.path("status").asText());
+		boolean justPaid = newStatus == PaymentStatus.PAID && payment.getStatus() != PaymentStatus.PAID;
+
+		Payment updated = payment.toBuilder()
+				.status(newStatus)
+				.paidAmount(newStatus == PaymentStatus.PAID ? new BigDecimal(order.path("total_amount").asText("0")) : payment.getPaidAmount())
+				.paidAt(newStatus == PaymentStatus.PAID ? Instant.now() : payment.getPaidAt())
+				.build();
+		paymentRepository.save(updated);
+
+		if (justPaid) {
+			orderPaidTopicPublisher.publish(new OrderPaidEvent(
+					null,
+					updated.getOrderId(),
+					new OrderPaidEvent.PaymentInfo(updated.getExternalPaymentId(), newStatus.name(),
+							updated.getPaymentMethod().name(), updated.getPaidAmount(), updated.getPaidAt().toString())));
+		}
+
+		log.info("Pagamento {} da OS {} atualizado para {} via webhook", dataId, payment.getOrderId(), newStatus);
 		return true;
 	}
 
-	public record PixCheckoutResult(String orderId, String externalReference, String status, String qrCode, String qrCodeBase64) {
-	}
-
-	public record CardCheckoutResult(String orderId, String externalReference, String status) {
+	private PaymentStatus mapStatus(String mercadoPagoStatus) {
+		return switch (mercadoPagoStatus) {
+			case "processed", "approved", "accredited" -> PaymentStatus.PAID;
+			case "action_required", "in_process", "pending" -> PaymentStatus.WAITING_PAYMENT;
+			case "failed", "rejected", "cancelled" -> PaymentStatus.FAILED;
+			default -> PaymentStatus.WAITING_PAYMENT;
+		};
 	}
 
 }

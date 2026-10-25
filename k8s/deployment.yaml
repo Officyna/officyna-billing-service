@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: officyna-billing-service
+  labels:
+    app.kubernetes.io/name: officyna-billing
+    app.kubernetes.io/component: api
+  namespace: officyna
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: officyna-billing
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: officyna-billing
+        app.kubernetes.io/component: api
+    spec:
+      imagePullSecrets:
+        - name: ghcr-secret
+      containers:
+        - name: officyna-billing-service
+          image: ghcr.io/officyna/officyna-billing-service:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: officyna-billing-configmap
+            - secretRef:
+                name: officyna-billing-secret
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          startupProbe:
+            httpGet:
+              path: /actuator/health
+              port: http
+            periodSeconds: 5
+            failureThreshold: 40
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: http
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: http
+            periodSeconds: 15
+            failureThreshold: 3
