@@ -171,11 +171,12 @@ jobs:
       - name: Aplicar Secret
         env:
           BILLING_DB_ENDPOINT: ${{ steps.billingdb.outputs.endpoint }}
-          DB_PASSWORD: ${{ secrets.BILLING_DB_PASSWORD }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD_BILLING_SERVICE }}
           MERCADOPAGO_ACCESS_TOKEN: ${{ secrets.MERCADOPAGO_ACCESS_TOKEN }}
           MERCADOPAGO_WEBHOOK_SECRET: ${{ secrets.MERCADOPAGO_WEBHOOK_SECRET }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          NEW_RELIC_LICENSE_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
         run: |
           export SPRING_DATASOURCE_URL="jdbc:postgresql://${BILLING_DB_ENDPOINT}:5432/officyna_billing?user=officynabillingdbuser&password=${DB_PASSWORD}&sslmode=require"
           envsubst < k8s/secret.yaml | kubectl apply -f -

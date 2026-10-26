@@ -1,0 +1,33 @@
+# Config enxuta do agente New Relic — sem license_key aqui de propósito, o agente lê a variável
+# de ambiente NEW_RELIC_LICENSE_KEY nativamente (evita hardcodar secret em arquivo committado).
+# Referência completa de opções: https://docs.newrelic.com/docs/agents/java-agent/configuration/java-agent-configuration-config-file/
+
+common: &default_settings
+  app_name: 'officyna-billing-service'
+  agent_enabled: true
+  log_level: info
+
+  application_logging:
+    enabled: true
+    forwarding:
+      enabled: true
+    metrics:
+      enabled: true
+
+  distributed_tracing:
+    enabled: true
+
+development:
+  <<: *default_settings
+  app_name: 'officyna-billing-service (Development)'
+
+test:
+  <<: *default_settings
+  app_name: 'officyna-billing-service (Test)'
+
+production:
+  <<: *default_settings
+
+staging:
+  <<: *default_settings
+  app_name: 'officyna-billing-service (Staging)'
