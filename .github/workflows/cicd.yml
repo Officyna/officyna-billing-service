@@ -133,7 +133,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: ${{ vars.AWS_REGION }}
 
       - name: Ler endpoint do banco (SSM Parameter Store)
         id: billingdb
@@ -142,7 +142,7 @@ jobs:
           echo "endpoint=$ENDPOINT" >> "$GITHUB_OUTPUT"
 
       - name: Atualizar kube config
-        run: aws eks update-kubeconfig --name eks-officyna-service --region us-east-1
+        run: aws eks update-kubeconfig --name eks-officyna-service --region ${{ vars.AWS_REGION }}
 
       - name: Aguardar nós prontos
         run: |
@@ -277,13 +277,13 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: ${{ vars.AWS_REGION }}
 
       - name: Atualizar kubeconfig
         run: |
           aws eks update-kubeconfig \
             --name eks-officyna-service \
-            --region ${{ secrets.AWS_REGION }} || \
+            --region ${{ vars.AWS_REGION }} || \
           echo "Cluster EKS não encontrado (talvez já destruído); seguindo mesmo assim."
 
       - name: Remover recursos do Kubernetes
