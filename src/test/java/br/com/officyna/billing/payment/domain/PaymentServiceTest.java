@@ -20,6 +20,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -94,7 +95,7 @@ class PaymentServiceTest {
 
 		assertThat(accepted).isTrue();
 		verify(paymentRepository).save(argThatStatusIs(PaymentStatus.PAID));
-		verify(orderPaidTopicPublisher).publish(any(OrderPaidEvent.class));
+		verify(orderPaidTopicPublisher).publish(nullable(String.class), any(OrderPaidEvent.class));
 	}
 
 	@Test
