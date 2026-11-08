@@ -35,10 +35,12 @@ aws:
   access-key: ${AWS_ACCESS_KEY_ID:test}
   secret-key: ${AWS_SECRET_ACCESS_KEY:test}
   sqs:
-    generate-payment-queue: ${AWS_SQS_GENERATE_PAYMENT_QUEUE:officyna-billing-requests}
-    budget-generated-queue: ${AWS_SQS_BUDGET_GENERATED_QUEUE:officyna-billing-responses}
+    generate-payment-queue: ${AWS_SQS_GENERATE_PAYMENT_QUEUE:eventGeneratePayment}
+    budget-generated-queue: ${AWS_SQS_BUDGET_GENERATED_QUEUE:eventBugetGenerated}
+    service-order-recused-queue: ${AWS_SQS_SERVICE_ORDER_RECUSED_QUEUE:eventServiceOrderRecused}
   sns:
-    order-paid-topic-name: ${AWS_SNS_ORDER_PAID_TOPIC_NAME:officyna-billing-order-paid}
+    order-paid-topic-name: ${AWS_SNS_ORDER_PAID_TOPIC_NAME:topicAprovacao}
+    rejection-topic-name: ${AWS_SNS_REJECTION_TOPIC_NAME:topicRejeicao}
 
 springdoc:
   swagger-ui:

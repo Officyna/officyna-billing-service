@@ -88,4 +88,16 @@ public class MercadoPagoOrderGateway {
 				.body(JsonNode.class);
 	}
 
+	/**
+	 * Estorno total do pedido — sem corpo, a Orders API devolve o pedido já com os detalhes do
+	 * estorno em "transactions.payments[].refunds".
+	 */
+	public JsonNode refundOrder(String orderId) {
+		return restClient.post()
+				.uri("/v1/orders/{id}/refund", orderId)
+				.header("X-Idempotency-Key", UUID.randomUUID().toString())
+				.retrieve()
+				.body(JsonNode.class);
+	}
+
 }
