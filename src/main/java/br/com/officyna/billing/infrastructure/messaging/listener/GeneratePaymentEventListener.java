@@ -111,10 +111,12 @@ public class GeneratePaymentEventListener {
 			var supplies = event.supplies().stream()
 					.map(s -> new LineItemInput(s.supplyId(), s.description(), s.amount()))
 					.toList();
-			UUID budgetCorrelationId = correlationId != null ? UUID.fromString(correlationId) : UUID.randomUUID();
 
+			// UUID interno do orcamento (usado como external_reference no Mercado Pago) e
+			// sempre gerado por nos, independente do correlationId de rastreio - o do
+			// os-service e uma string livre, nao necessariamente em formato UUID.
 			budget = budgetCalculationService.generateInitialBudget(
-					event.serviceOrderId(), budgetCorrelationId, event.customerDocument(), labors, supplies);
+					event.serviceOrderId(), UUID.randomUUID(), event.customerDocument(), labors, supplies);
 
 			log.info("Orçamento inicial gerado orderId={} totalBudgetAmount={}", budget.getOrderId(), budget.getTotalBudgetAmount());
 		} else {
