@@ -24,13 +24,25 @@ public class MercadoPagoOrderGateway {
 	}
 
 	public JsonNode createPixOrder(BigDecimal amount, String externalReference, String payerEmail) {
+		return createPixOrder(amount, externalReference, payerEmail, null);
+	}
+
+	/**
+	 * @param customerDocument CPF do pagador — o Pix no Brasil exige identificação por regra do
+	 *                         Bacen; sem isso a Orders API pode recusar a cobrança. Omitido
+	 *                         (null/branco) quando quem chama ainda não tem esse dado.
+	 */
+	public JsonNode createPixOrder(BigDecimal amount, String externalReference, String payerEmail, String customerDocument) {
 		String amountStr = amount.toPlainString();
+		Map<String, Object> payer = (customerDocument == null || customerDocument.isBlank())
+				? Map.of("email", payerEmail)
+				: Map.of("email", payerEmail, "identification", Map.of("type", "CPF", "number", customerDocument));
 		Map<String, Object> body = Map.of(
 				"type", "online",
 				"processing_mode", "automatic",
 				"total_amount", amountStr,
 				"external_reference", externalReference,
-				"payer", Map.of("email", payerEmail),
+				"payer", payer,
 				"transactions", Map.of("payments", List.of(Map.of(
 						"amount", amountStr,
 						"payment_method", Map.of(
