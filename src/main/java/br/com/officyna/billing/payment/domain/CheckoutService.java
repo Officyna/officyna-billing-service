@@ -66,10 +66,10 @@ public class CheckoutService {
 				.build();
 		paymentRepository.save(payment);
 
-		return new CheckoutResult(orderId, PaymentStatus.WAITING_PAYMENT.name(), qrCode, qrCodeBase64, amount);
+		return new CheckoutResult(orderId, externalPaymentId, PaymentStatus.WAITING_PAYMENT.name(), qrCode, qrCodeBase64, amount);
 	}
 
-	public record CheckoutResult(String serviceOrderId, String status, String qrCode, String qrCodeBase64, BigDecimal totalAmount) {
+	public record CheckoutResult(String serviceOrderId, String externalPaymentId, String status, String qrCode, String qrCodeBase64, BigDecimal totalAmount) {
 	}
 
 }

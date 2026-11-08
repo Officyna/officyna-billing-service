@@ -39,7 +39,7 @@ public class CheckoutController {
 				request.cardToken(), request.cardBrand(), request.installments());
 
 		return ResponseEntity.ok(new CheckoutResponse(
-				result.serviceOrderId(), result.status(), result.qrCode(), result.qrCodeBase64(), result.totalAmount()));
+				result.serviceOrderId(), result.externalPaymentId(), result.status(), result.qrCode(), result.qrCodeBase64(), result.totalAmount()));
 	}
 
 	private <T> Set<String> toIds(List<T> items, java.util.function.Function<T, String> idExtractor) {
