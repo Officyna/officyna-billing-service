@@ -1,5 +1,6 @@
 package br.com.officyna.billing.infrastructure.messaging.publisher;
 
+import br.com.officyna.billing.infrastructure.messaging.CorrelationConstants;
 import br.com.officyna.billing.infrastructure.messaging.config.SqsQueueUrlResolver;
 import br.com.officyna.billing.infrastructure.messaging.resources.BudgetGeneratedEvent;
 import org.springframework.beans.factory.annotation.Value;
@@ -29,6 +30,7 @@ public class BudgetEventPublisher {
 		sqsClient.sendMessage(SendMessageRequest.builder()
 				.queueUrl(queueUrlResolver.resolve(queueName))
 				.messageBody(objectMapper.writeValueAsString(event))
+				.messageAttributes(CorrelationConstants.sqsAttribute(event.correlationId()))
 				.build());
 	}
 

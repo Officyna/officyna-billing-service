@@ -17,12 +17,14 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.DeleteMessageRequest;
 import software.amazon.awssdk.services.sqs.model.Message;
+import software.amazon.awssdk.services.sqs.model.MessageAttributeValue;
 import software.amazon.awssdk.services.sqs.model.ReceiveMessageRequest;
 import software.amazon.awssdk.services.sqs.model.ReceiveMessageResponse;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.math.BigDecimal;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -81,9 +83,13 @@ class GeneratePaymentEventListenerTest {
 	}
 
 	private void mockReceiveSingleMessage(String body) {
+		mockReceiveSingleMessage(body, Map.of());
+	}
+
+	private void mockReceiveSingleMessage(String body, Map<String, MessageAttributeValue> attributes) {
 		when(queueUrlResolver.resolve("eventGeneratePayment")).thenReturn("queue-url");
 		when(sqsClient.receiveMessage(any(ReceiveMessageRequest.class))).thenReturn(ReceiveMessageResponse.builder()
-				.messages(Message.builder().messageId("m1").receiptHandle("rh1").body(body).build())
+				.messages(Message.builder().messageId("m1").receiptHandle("rh1").body(body).messageAttributes(attributes).build())
 				.build());
 	}
 
@@ -133,8 +139,29 @@ class GeneratePaymentEventListenerTest {
 		verify(sqsClient).deleteMessage(any(DeleteMessageRequest.class));
 	}
 
+	@Test
+	@DisplayName("Le o correlationId do message attribute da SQS (nao do corpo), igual a AbstractSqsQueueListener do os-service")
+	void deveLerCorrelationIdDoMessageAttributeEmVezDoCorpo() {
+		mockReceiveSingleMessage(
+				"""
+				{ "correlationId": null, "serviceOrderId": "os-1", "payerEmail": null, "customerDocument": null, "labors": [], "supplies": [] }
+				""",
+				Map.of("correlationId", MessageAttributeValue.builder().dataType("String").stringValue("corr-abc").build()));
+		when(budgetRepository.findByOrderId("os-1")).thenReturn(Optional.empty());
+		when(budgetCalculationService.generateInitialBudget(eq("os-1"), any(), any(), any(), any()))
+				.thenReturn(budgetComTotais());
+
+		listener().poll();
+
+		verify(budgetEventPublisher).publish(argThatCorrelationIdIs("corr-abc"));
+	}
+
 	private static BudgetGeneratedEvent argThatQrCodeIs(String qrCode) {
 		return org.mockito.ArgumentMatchers.argThat(evt -> evt != null && java.util.Objects.equals(evt.qrCode(), qrCode));
+	}
+
+	private static BudgetGeneratedEvent argThatCorrelationIdIs(String correlationId) {
+		return org.mockito.ArgumentMatchers.argThat(evt -> evt != null && java.util.Objects.equals(evt.correlationId(), correlationId));
 	}
 
 }

@@ -4,6 +4,7 @@ import br.com.officyna.billing.budget.domain.Budget;
 import br.com.officyna.billing.budget.domain.BudgetCalculationService;
 import br.com.officyna.billing.budget.domain.BudgetRepository;
 import br.com.officyna.billing.budget.domain.LineItemInput;
+import br.com.officyna.billing.infrastructure.messaging.CorrelationConstants;
 import br.com.officyna.billing.infrastructure.mercadopago.MercadoPagoOrderGateway;
 import br.com.officyna.billing.infrastructure.messaging.config.SqsQueueUrlResolver;
 import br.com.officyna.billing.infrastructure.messaging.publisher.BudgetEventPublisher;
@@ -76,6 +77,7 @@ public class GeneratePaymentEventListener {
 				.queueUrl(queueUrl)
 				.maxNumberOfMessages(10)
 				.waitTimeSeconds(5)
+				.messageAttributeNames("All")
 				.build());
 
 		for (Message message : response.messages()) {
@@ -93,6 +95,7 @@ public class GeneratePaymentEventListener {
 
 	private void process(Message message) {
 		GeneratePaymentEvent event = objectMapper.readValue(message.body(), GeneratePaymentEvent.class);
+		String correlationId = extractCorrelationId(message, event.correlationId());
 
 		boolean recalculo = budgetRepository.findByOrderId(event.serviceOrderId()).isPresent();
 
@@ -108,10 +111,10 @@ public class GeneratePaymentEventListener {
 			var supplies = event.supplies().stream()
 					.map(s -> new LineItemInput(s.supplyId(), s.description(), s.amount()))
 					.toList();
-			UUID correlationId = event.correlationId() != null ? UUID.fromString(event.correlationId()) : UUID.randomUUID();
+			UUID budgetCorrelationId = correlationId != null ? UUID.fromString(correlationId) : UUID.randomUUID();
 
 			budget = budgetCalculationService.generateInitialBudget(
-					event.serviceOrderId(), correlationId, event.customerDocument(), labors, supplies);
+					event.serviceOrderId(), budgetCorrelationId, event.customerDocument(), labors, supplies);
 
 			log.info("Orçamento inicial gerado orderId={} totalBudgetAmount={}", budget.getOrderId(), budget.getTotalBudgetAmount());
 		} else {
@@ -145,7 +148,7 @@ public class GeneratePaymentEventListener {
 		}
 
 		budgetEventPublisher.publish(new BudgetGeneratedEvent(
-				event.correlationId(),
+				correlationId,
 				budget.getOrderId(),
 				new BudgetGeneratedEvent.Totals(
 						budget.getTotalLaborsAmount(), budget.getTotalSupplyAmount(),
@@ -154,6 +157,23 @@ public class GeneratePaymentEventListener {
 				paymentLink,
 				qrCode,
 				qrCodeBase64));
+	}
+
+	/**
+	 * O os-service manda o correlationId como message attribute do SQS (nao no corpo da
+	 * mensagem) - mesmo padrao da {@code AbstractSqsQueueListener} dele. Sem pedir
+	 * {@code messageAttributeNames("All")} no receive, a gente nunca via esse valor. O campo
+	 * do corpo fica so como fallback (ex: testes manuais mandando direto na fila).
+	 */
+	private String extractCorrelationId(Message message, String bodyFallback) {
+		var attributes = message.messageAttributes();
+		if (attributes.containsKey(CorrelationConstants.CORRELATION_ID_HEADER)) {
+			return attributes.get(CorrelationConstants.CORRELATION_ID_HEADER).stringValue();
+		}
+		if (attributes.containsKey(CorrelationConstants.LEGACY_CORRELATION_ID_HEADER)) {
+			return attributes.get(CorrelationConstants.LEGACY_CORRELATION_ID_HEADER).stringValue();
+		}
+		return bodyFallback;
 	}
 
 }
