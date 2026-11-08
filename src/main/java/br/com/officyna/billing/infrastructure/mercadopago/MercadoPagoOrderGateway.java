@@ -1,10 +1,12 @@
 package br.com.officyna.billing.infrastructure.mercadopago;
 
+import br.com.officyna.billing.infrastructure.config.MercadoPagoProperties;
 import tools.jackson.databind.JsonNode;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 import java.math.BigDecimal;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -18,9 +20,11 @@ import java.util.UUID;
 public class MercadoPagoOrderGateway {
 
 	private final RestClient restClient;
+	private final MercadoPagoProperties properties;
 
-	public MercadoPagoOrderGateway(RestClient mercadoPagoRestClient) {
+	public MercadoPagoOrderGateway(RestClient mercadoPagoRestClient, MercadoPagoProperties properties) {
 		this.restClient = mercadoPagoRestClient;
+		this.properties = properties;
 	}
 
 	public JsonNode createPixOrder(BigDecimal amount, String externalReference, String payerEmail) {
@@ -34,15 +38,12 @@ public class MercadoPagoOrderGateway {
 	 */
 	public JsonNode createPixOrder(BigDecimal amount, String externalReference, String payerEmail, String customerDocument) {
 		String amountStr = amount.toPlainString();
-		Map<String, Object> payer = (customerDocument == null || customerDocument.isBlank())
-				? Map.of("email", payerEmail)
-				: Map.of("email", payerEmail, "identification", Map.of("type", "CPF", "number", customerDocument));
 		Map<String, Object> body = Map.of(
 				"type", "online",
 				"processing_mode", "automatic",
 				"total_amount", amountStr,
 				"external_reference", externalReference,
-				"payer", payer,
+				"payer", buildPayer(payerEmail, customerDocument),
 				"transactions", Map.of("payments", List.of(Map.of(
 						"amount", amountStr,
 						"payment_method", Map.of(
@@ -52,6 +53,25 @@ public class MercadoPagoOrderGateway {
 				)))
 		);
 		return postOrder(body);
+	}
+
+	/**
+	 * Em sandbox, a Orders API so aprova um Pix de teste sozinha (e dispara o webhook de
+	 * verdade) se o payer vier com first_name "APRO" - sem isso o pedido fica parado pra
+	 * sempre em action_required/pendente, porque nao existe Pix real por tras do sandbox.
+	 * So entra quando mercadopago.test-mode esta ligado, pra nao arriscar mandar isso como
+	 * nome de um cliente de verdade em producao.
+	 */
+	private Map<String, Object> buildPayer(String payerEmail, String customerDocument) {
+		Map<String, Object> payer = new HashMap<>();
+		payer.put("email", payerEmail);
+		if (customerDocument != null && !customerDocument.isBlank()) {
+			payer.put("identification", Map.of("type", "CPF", "number", customerDocument));
+		}
+		if (properties.testMode()) {
+			payer.put("first_name", "APRO");
+		}
+		return payer;
 	}
 
 	/**

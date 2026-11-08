@@ -11,3 +11,7 @@ data:
   AWS_SNS_ORDER_PAID_TOPIC_NAME: "topicAprovacao"
   AWS_SQS_SERVICE_ORDER_RECUSED_QUEUE: "eventServiceOrderRecused"
   AWS_SNS_REJECTION_TOPIC_NAME: "topicRejeicao"
+  # Ambiente inteiro usa credenciais de teste da Mercado Pago - com isso ligado, todo Pix gerado
+  # ja sai com o gatilho "APRO" (ver MercadoPagoOrderGateway), pra aprovar sozinho no sandbox e
+  # disparar o webhook de verdade, em vez de ficar parado pra sempre em pendente.
+  MERCADOPAGO_TEST_MODE: "true"
