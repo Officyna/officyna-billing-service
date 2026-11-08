@@ -68,11 +68,12 @@ public class PaymentService {
 		paymentRepository.save(updated);
 
 		if (justPaid) {
-			orderPaidTopicPublisher.publish(new OrderPaidEvent(
-					null,
-					updated.getOrderId(),
+			OrderPaidEvent event = new OrderPaidEvent(updated.getOrderId(),
 					new OrderPaidEvent.PaymentInfo(updated.getExternalPaymentId(), newStatus.name(),
-							updated.getPaymentMethod().name(), updated.getPaidAmount(), updated.getPaidAt().toString())));
+							updated.getPaymentMethod().name(), updated.getPaidAmount(), updated.getPaidAt().toString()));
+			orderPaidTopicPublisher.publish(null, event);
+			log.info("Publicado eventOrderPaid para OS {} paymentId={} status={}",
+					updated.getOrderId(), updated.getExternalPaymentId(), newStatus);
 		}
 		if (justFailed) {
 			rejectionTopicPublisher.publish(new RejectionEvent(

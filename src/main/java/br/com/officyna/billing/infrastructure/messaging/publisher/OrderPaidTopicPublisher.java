@@ -29,11 +29,11 @@ public class OrderPaidTopicPublisher {
 		this.topicName = topicName;
 	}
 
-	public void publish(OrderPaidEvent event) {
+	public void publish(String correlationId, OrderPaidEvent event) {
 		snsClient.publish(PublishRequest.builder()
 				.topicArn(topicArn())
 				.message(objectMapper.writeValueAsString(event))
-				.messageAttributes(CorrelationConstants.snsAttribute(event.correlationId()))
+				.messageAttributes(CorrelationConstants.snsAttribute(correlationId))
 				.build());
 	}
 
