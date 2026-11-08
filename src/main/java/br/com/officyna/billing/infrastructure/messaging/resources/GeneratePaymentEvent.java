@@ -1,5 +1,7 @@
 package br.com.officyna.billing.infrastructure.messaging.resources;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
+
 import java.math.BigDecimal;
 import java.util.List;
 
@@ -18,10 +20,18 @@ public record GeneratePaymentEvent(
 		List<SupplyPayload> supplies
 ) {
 
-	public record LaborPayload(String laborId, String description, BigDecimal amount, String situation) {
+	public record LaborPayload(
+			String laborId,
+			String description,
+			@JsonAlias("laborPrice") BigDecimal amount,
+			String situation) {
 	}
 
-	public record SupplyPayload(String supplyId, String description, BigDecimal amount, String situation) {
+	public record SupplyPayload(
+			@JsonAlias("id") String supplyId,
+			String description,
+			@JsonAlias("totalPrice") BigDecimal amount,
+			String situation) {
 	}
 
 }
