@@ -1,5 +1,6 @@
 package br.com.officyna.billing.infrastructure.messaging.publisher;
 
+import br.com.officyna.billing.infrastructure.messaging.CorrelationConstants;
 import br.com.officyna.billing.infrastructure.messaging.resources.OrderPaidEvent;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -32,6 +33,7 @@ public class OrderPaidTopicPublisher {
 		snsClient.publish(PublishRequest.builder()
 				.topicArn(topicArn())
 				.message(objectMapper.writeValueAsString(event))
+				.messageAttributes(CorrelationConstants.snsAttribute(event.correlationId()))
 				.build());
 	}
 
