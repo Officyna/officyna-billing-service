@@ -6,6 +6,8 @@ metadata:
 data:
   SERVER_PORT: "8080"
   AWS_REGION: "us-east-1"
-  AWS_SQS_GENERATE_PAYMENT_QUEUE: "officyna-billing-requests"
-  AWS_SQS_BUDGET_GENERATED_QUEUE: "officyna-billing-responses"
-  AWS_SNS_ORDER_PAID_TOPIC_NAME: "officyna-billing-order-paid"
+  AWS_SQS_GENERATE_PAYMENT_QUEUE: "eventGeneratePayment"
+  AWS_SQS_BUDGET_GENERATED_QUEUE: "eventBugetGenerated"
+  AWS_SNS_ORDER_PAID_TOPIC_NAME: "topicAprovacao"
+  AWS_SQS_SERVICE_ORDER_RECUSED_QUEUE: "eventServiceOrderRecused"
+  AWS_SNS_REJECTION_TOPIC_NAME: "topicRejeicao"
