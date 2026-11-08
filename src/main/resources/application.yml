@@ -23,6 +23,7 @@ mercadopago:
   api-base-url: ${MERCADOPAGO_API_BASE_URL:https://api.mercadopago.com}
   access-token: ${MERCADOPAGO_ACCESS_TOKEN:}
   webhook-secret: ${MERCADOPAGO_WEBHOOK_SECRET:}
+  test-mode: ${MERCADOPAGO_TEST_MODE:false}
 
 billing:
   tax:
