@@ -9,9 +9,10 @@ data:
   AWS_SQS_GENERATE_PAYMENT_QUEUE: "eventGeneratePayment"
   AWS_SQS_BUDGET_GENERATED_QUEUE: "eventBugetGenerated"
   AWS_SNS_ORDER_PAID_TOPIC_NAME: "topicAprovacao"
-  AWS_SQS_SERVICE_ORDER_RECUSED_QUEUE: "eventServiceOrderRecused"
+  AWS_SQS_SERVICE_ORDER_RECUSED_QUEUE: "eventServiceOrderRecusedPayment"
   AWS_SNS_REJECTION_TOPIC_NAME: "topicRejeicao"
-  # Ambiente inteiro usa credenciais de teste da Mercado Pago - com isso ligado, todo Pix gerado
-  # ja sai com o gatilho "APRO" (ver MercadoPagoOrderGateway), pra aprovar sozinho no sandbox e
-  # disparar o webhook de verdade, em vez de ficar parado pra sempre em pendente.
-  MERCADOPAGO_TEST_MODE: "true"
+  # Desligado de proposito: com isso em "true", todo Pix gerado ja sai aprovando sozinho no
+  # sandbox (gatilho "APRO", ver MercadoPagoOrderGateway), o que atrapalha testar outros cenarios
+  # (pagamento pendente, simular webhook na mao, etc). Ligar so quando quiser esse
+  # comportamento especifico de novo.
+  MERCADOPAGO_TEST_MODE: "false"
