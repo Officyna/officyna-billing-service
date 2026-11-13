@@ -1,5 +1,8 @@
 package br.com.officyna.billing.payment.domain;
 
+import br.com.officyna.billing.budget.domain.Budget;
+import br.com.officyna.billing.budget.domain.BudgetRepository;
+import br.com.officyna.billing.budget.domain.BudgetStatus;
 import br.com.officyna.billing.infrastructure.mercadopago.MercadoPagoOrderGateway;
 import br.com.officyna.billing.infrastructure.messaging.publisher.OrderPaidTopicPublisher;
 import br.com.officyna.billing.infrastructure.messaging.publisher.RejectionTopicPublisher;
@@ -22,15 +25,17 @@ public class PaymentService {
 	private final MercadoPagoOrderGateway gateway;
 	private final WebhookSignatureValidator signatureValidator;
 	private final PaymentRepository paymentRepository;
+	private final BudgetRepository budgetRepository;
 	private final OrderPaidTopicPublisher orderPaidTopicPublisher;
 	private final RejectionTopicPublisher rejectionTopicPublisher;
 
 	public PaymentService(MercadoPagoOrderGateway gateway, WebhookSignatureValidator signatureValidator,
-			PaymentRepository paymentRepository, OrderPaidTopicPublisher orderPaidTopicPublisher,
-			RejectionTopicPublisher rejectionTopicPublisher) {
+			PaymentRepository paymentRepository, BudgetRepository budgetRepository,
+			OrderPaidTopicPublisher orderPaidTopicPublisher, RejectionTopicPublisher rejectionTopicPublisher) {
 		this.gateway = gateway;
 		this.signatureValidator = signatureValidator;
 		this.paymentRepository = paymentRepository;
+		this.budgetRepository = budgetRepository;
 		this.orderPaidTopicPublisher = orderPaidTopicPublisher;
 		this.rejectionTopicPublisher = rejectionTopicPublisher;
 	}
@@ -87,10 +92,14 @@ public class PaymentService {
 	/**
 	 * Cliente cancelou/recusou a ordem de serviço: se já havia pagamento aprovado, solicita o
 	 * estorno ao Mercado Pago e marca REFUNDED; senão, apenas marca FAILED (nunca chegou a pagar).
+	 * Se a OS foi recusada antes de sequer gerar pagamento (ainda na 1ª rodada do
+	 * eventGeneratePayment, só orçamento), não existe Payment pra atualizar, mas o Budget sim -
+	 * marca REJECTED nele pra não ficar PENDING_APPROVAL pra sempre (rastreabilidade/auditoria).
 	 */
 	public void handleServiceOrderRecused(String serviceOrderId) {
 		var paymentOpt = paymentRepository.findByOrderId(serviceOrderId);
 		if (paymentOpt.isEmpty()) {
+			rejectBudgetIfPresent(serviceOrderId);
 			log.info("Ignorando eventServiceOrderRecused: nenhum pagamento encontrado para a OS {}", serviceOrderId);
 			return;
 		}
@@ -108,6 +117,18 @@ public class PaymentService {
 			log.info("Pagamento da OS {} marcado como FAILED após recusa/cancelamento da ordem de serviço (sem pagamento a estornar)",
 					serviceOrderId);
 		}
+	}
+
+	private void rejectBudgetIfPresent(String serviceOrderId) {
+		budgetRepository.findByOrderId(serviceOrderId).ifPresent(budget -> {
+			if (budget.getStatus() == BudgetStatus.REJECTED) {
+				return;
+			}
+			Budget rejected = budget.toBuilder().status(BudgetStatus.REJECTED).build();
+			budgetRepository.save(rejected);
+			log.info("Orçamento da OS {} marcado como REJECTED após recusa/cancelamento (sem pagamento gerado ainda)",
+					serviceOrderId);
+		});
 	}
 
 	private PaymentStatus mapStatus(String mercadoPagoStatus) {
