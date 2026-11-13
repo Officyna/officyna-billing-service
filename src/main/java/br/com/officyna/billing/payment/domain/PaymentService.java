@@ -136,7 +136,11 @@ public class PaymentService {
 			case "processed", "approved", "accredited" -> PaymentStatus.PAID;
 			case "action_required", "in_process", "pending" -> PaymentStatus.WAITING_PAYMENT;
 			case "failed", "rejected", "cancelled" -> PaymentStatus.FAILED;
-			default -> PaymentStatus.WAITING_PAYMENT;
+			default -> {
+				log.error("PAGAMENTO COM STATUS NAO TRATADO recebido do Mercado Pago: '{}' - IMPLEMENTAR TRATATIVA " +
+						"(ex: 'refunded' apos estorno). Mantendo como WAITING_PAYMENT ate decisao.", mercadoPagoStatus);
+				yield PaymentStatus.WAITING_PAYMENT;
+			}
 		};
 	}
 
