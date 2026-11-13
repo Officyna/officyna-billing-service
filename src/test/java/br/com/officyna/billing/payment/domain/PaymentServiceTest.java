@@ -1,5 +1,8 @@
 package br.com.officyna.billing.payment.domain;
 
+import br.com.officyna.billing.budget.domain.Budget;
+import br.com.officyna.billing.budget.domain.BudgetRepository;
+import br.com.officyna.billing.budget.domain.BudgetStatus;
 import br.com.officyna.billing.infrastructure.mercadopago.MercadoPagoOrderGateway;
 import br.com.officyna.billing.infrastructure.messaging.publisher.OrderPaidTopicPublisher;
 import br.com.officyna.billing.infrastructure.messaging.publisher.RejectionTopicPublisher;
@@ -40,13 +43,17 @@ class PaymentServiceTest {
 	private PaymentRepository paymentRepository;
 
 	@Mock
+	private BudgetRepository budgetRepository;
+
+	@Mock
 	private OrderPaidTopicPublisher orderPaidTopicPublisher;
 
 	@Mock
 	private RejectionTopicPublisher rejectionTopicPublisher;
 
 	private PaymentService paymentService() {
-		return new PaymentService(gateway, signatureValidator, paymentRepository, orderPaidTopicPublisher, rejectionTopicPublisher);
+		return new PaymentService(gateway, signatureValidator, paymentRepository, budgetRepository,
+				orderPaidTopicPublisher, rejectionTopicPublisher);
 	}
 
 	@Test
@@ -191,14 +198,50 @@ class PaymentServiceTest {
 	}
 
 	@Test
-	@DisplayName("Deve ignorar eventServiceOrderRecused de uma OS sem pagamento algum")
+	@DisplayName("Deve ignorar eventServiceOrderRecused de uma OS sem pagamento nem orçamento algum")
 	void deveIgnorarRecusaDeOsSemPagamento() {
 		when(paymentRepository.findByOrderId("os-sem-pagamento")).thenReturn(Optional.empty());
+		when(budgetRepository.findByOrderId("os-sem-pagamento")).thenReturn(Optional.empty());
 
 		paymentService().handleServiceOrderRecused("os-sem-pagamento");
 
 		verifyNoInteractions(gateway);
 		verify(paymentRepository, org.mockito.Mockito.never()).save(any());
+		verify(budgetRepository, org.mockito.Mockito.never()).save(any());
+	}
+
+	@Test
+	@DisplayName("Deve marcar orçamento como REJECTED quando a OS é recusada antes de gerar pagamento")
+	void deveMarcarOrcamentoComoRejectedQuandoRecusadaSemPagamento() {
+		when(paymentRepository.findByOrderId("os-1")).thenReturn(Optional.empty());
+		Budget budget = Budget.builder()
+				.id(UUID.randomUUID())
+				.orderId("os-1")
+				.status(BudgetStatus.PENDING_APPROVAL)
+				.build();
+		when(budgetRepository.findByOrderId("os-1")).thenReturn(Optional.of(budget));
+		when(budgetRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+		paymentService().handleServiceOrderRecused("os-1");
+
+		verify(budgetRepository).save(org.mockito.ArgumentMatchers
+				.argThat(b -> b != null && b.getStatus() == BudgetStatus.REJECTED));
+	}
+
+	@Test
+	@DisplayName("Não deve salvar de novo um orçamento que já está REJECTED")
+	void naoDeveSalvarOrcamentoJaRejected() {
+		when(paymentRepository.findByOrderId("os-1")).thenReturn(Optional.empty());
+		Budget budget = Budget.builder()
+				.id(UUID.randomUUID())
+				.orderId("os-1")
+				.status(BudgetStatus.REJECTED)
+				.build();
+		when(budgetRepository.findByOrderId("os-1")).thenReturn(Optional.of(budget));
+
+		paymentService().handleServiceOrderRecused("os-1");
+
+		verify(budgetRepository, org.mockito.Mockito.never()).save(any());
 	}
 
 	private static Payment argThatStatusIs(PaymentStatus status) {
