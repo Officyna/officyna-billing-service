@@ -11,8 +11,4 @@ data:
   AWS_SNS_ORDER_PAID_TOPIC_NAME: "topicAprovacao"
   AWS_SQS_SERVICE_ORDER_RECUSED_QUEUE: "eventServiceOrderRecusedPayment"
   AWS_SNS_REJECTION_TOPIC_NAME: "topicRejeicao"
-  # Desligado de proposito: com isso em "true", todo Pix gerado ja sai aprovando sozinho no
-  # sandbox (gatilho "APRO", ver MercadoPagoOrderGateway), o que atrapalha testar outros cenarios
-  # (pagamento pendente, simular webhook na mao, etc). Ligar so quando quiser esse
-  # comportamento especifico de novo.
-  MERCADOPAGO_TEST_MODE: "false"
+  MERCADOPAGO_TEST_MODE: "true"
