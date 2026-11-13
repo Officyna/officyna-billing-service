@@ -20,7 +20,7 @@ class WebhookSignatureValidatorTest {
 
 	@BeforeEach
 	void setUp() {
-		validator = new WebhookSignatureValidator(new MercadoPagoProperties("https://api.mercadopago.com", "token", SECRET));
+		validator = new WebhookSignatureValidator(new MercadoPagoProperties("https://api.mercadopago.com", "token", SECRET, false));
 	}
 
 	@Test

@@ -9,7 +9,7 @@ spec:
     kind: Deployment
     name: officyna-billing-service
   minReplicas: 1
-  maxReplicas: 10
+  maxReplicas: 3
   metrics:
     - type: Resource
       resource:
@@ -17,9 +17,3 @@ spec:
         target:
           type: Utilization
           averageUtilization: 70
-    - type: Resource
-      resource:
-        name: memory
-        target:
-          type: Utilization
-          averageUtilization: 80

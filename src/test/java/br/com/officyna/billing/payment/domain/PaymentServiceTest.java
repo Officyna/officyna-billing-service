@@ -1,8 +1,13 @@
 package br.com.officyna.billing.payment.domain;
 
+import br.com.officyna.billing.budget.domain.Budget;
+import br.com.officyna.billing.budget.domain.BudgetRepository;
+import br.com.officyna.billing.budget.domain.BudgetStatus;
 import br.com.officyna.billing.infrastructure.mercadopago.MercadoPagoOrderGateway;
 import br.com.officyna.billing.infrastructure.messaging.publisher.OrderPaidTopicPublisher;
+import br.com.officyna.billing.infrastructure.messaging.publisher.RejectionTopicPublisher;
 import br.com.officyna.billing.infrastructure.messaging.resources.OrderPaidEvent;
+import br.com.officyna.billing.infrastructure.messaging.resources.RejectionEvent;
 import br.com.officyna.billing.infrastructure.security.WebhookSignatureValidator;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -18,6 +23,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -37,10 +43,17 @@ class PaymentServiceTest {
 	private PaymentRepository paymentRepository;
 
 	@Mock
+	private BudgetRepository budgetRepository;
+
+	@Mock
 	private OrderPaidTopicPublisher orderPaidTopicPublisher;
 
+	@Mock
+	private RejectionTopicPublisher rejectionTopicPublisher;
+
 	private PaymentService paymentService() {
-		return new PaymentService(gateway, signatureValidator, paymentRepository, orderPaidTopicPublisher);
+		return new PaymentService(gateway, signatureValidator, paymentRepository, budgetRepository,
+				orderPaidTopicPublisher, rejectionTopicPublisher);
 	}
 
 	@Test
@@ -89,7 +102,7 @@ class PaymentServiceTest {
 
 		assertThat(accepted).isTrue();
 		verify(paymentRepository).save(argThatStatusIs(PaymentStatus.PAID));
-		verify(orderPaidTopicPublisher).publish(any(OrderPaidEvent.class));
+		verify(orderPaidTopicPublisher).publish(nullable(String.class), any(OrderPaidEvent.class));
 	}
 
 	@Test
@@ -115,6 +128,120 @@ class PaymentServiceTest {
 
 		assertThat(accepted).isTrue();
 		verifyNoInteractions(orderPaidTopicPublisher);
+	}
+
+	@Test
+	@DisplayName("Deve marcar pagamento como FAILED e publicar eventTopicRejeicao quando o Mercado Pago recusa")
+	void deveMarcarComoFailedEPublicarRejeicao() throws Exception {
+		when(signatureValidator.isValid(anyString(), anyString(), anyString())).thenReturn(true);
+		Payment existing = Payment.builder()
+				.id(UUID.randomUUID())
+				.budgetId(UUID.randomUUID())
+				.orderId("os-1")
+				.externalPaymentId("order-123")
+				.paymentMethod(PaymentMethod.PIX)
+				.status(PaymentStatus.WAITING_PAYMENT)
+				.build();
+		when(paymentRepository.findByExternalPaymentId("order-123")).thenReturn(Optional.of(existing));
+		JsonNode order = MAPPER.readTree("""
+				{ "status": "rejected", "total_amount": "350.00" }
+				""");
+		when(gateway.getOrder("order-123")).thenReturn(order);
+		when(paymentRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+		boolean accepted = paymentService().handleWebhook("ts=1,v1=x", "req-1", "payment", "order-123");
+
+		assertThat(accepted).isTrue();
+		verify(paymentRepository).save(argThatStatusIs(PaymentStatus.FAILED));
+		verify(rejectionTopicPublisher).publish(any(RejectionEvent.class));
+		verifyNoInteractions(orderPaidTopicPublisher);
+	}
+
+	@Test
+	@DisplayName("Deve estornar via Mercado Pago quando a OS é recusada e o pagamento já estava PAID")
+	void deveEstornarQuandoOsRecusadaComPagamentoJaConfirmado() {
+		Payment existing = Payment.builder()
+				.id(UUID.randomUUID())
+				.budgetId(UUID.randomUUID())
+				.orderId("os-1")
+				.externalPaymentId("order-123")
+				.paymentMethod(PaymentMethod.PIX)
+				.status(PaymentStatus.PAID)
+				.build();
+		when(paymentRepository.findByOrderId("os-1")).thenReturn(Optional.of(existing));
+		when(paymentRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+		paymentService().handleServiceOrderRecused("os-1");
+
+		verify(gateway).refundOrder("order-123");
+		verify(paymentRepository).save(argThatStatusIs(PaymentStatus.REFUNDED));
+	}
+
+	@Test
+	@DisplayName("Não deve estornar quando a OS é recusada mas o pagamento nunca foi confirmado")
+	void naoDeveEstornarQuandoOsRecusadaSemPagamentoConfirmado() {
+		Payment existing = Payment.builder()
+				.id(UUID.randomUUID())
+				.budgetId(UUID.randomUUID())
+				.orderId("os-1")
+				.externalPaymentId("order-123")
+				.paymentMethod(PaymentMethod.PIX)
+				.status(PaymentStatus.WAITING_PAYMENT)
+				.build();
+		when(paymentRepository.findByOrderId("os-1")).thenReturn(Optional.of(existing));
+		when(paymentRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+		paymentService().handleServiceOrderRecused("os-1");
+
+		verifyNoInteractions(gateway);
+		verify(paymentRepository).save(argThatStatusIs(PaymentStatus.FAILED));
+	}
+
+	@Test
+	@DisplayName("Deve ignorar eventServiceOrderRecused de uma OS sem pagamento nem orçamento algum")
+	void deveIgnorarRecusaDeOsSemPagamento() {
+		when(paymentRepository.findByOrderId("os-sem-pagamento")).thenReturn(Optional.empty());
+		when(budgetRepository.findByOrderId("os-sem-pagamento")).thenReturn(Optional.empty());
+
+		paymentService().handleServiceOrderRecused("os-sem-pagamento");
+
+		verifyNoInteractions(gateway);
+		verify(paymentRepository, org.mockito.Mockito.never()).save(any());
+		verify(budgetRepository, org.mockito.Mockito.never()).save(any());
+	}
+
+	@Test
+	@DisplayName("Deve marcar orçamento como REJECTED quando a OS é recusada antes de gerar pagamento")
+	void deveMarcarOrcamentoComoRejectedQuandoRecusadaSemPagamento() {
+		when(paymentRepository.findByOrderId("os-1")).thenReturn(Optional.empty());
+		Budget budget = Budget.builder()
+				.id(UUID.randomUUID())
+				.orderId("os-1")
+				.status(BudgetStatus.PENDING_APPROVAL)
+				.build();
+		when(budgetRepository.findByOrderId("os-1")).thenReturn(Optional.of(budget));
+		when(budgetRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+		paymentService().handleServiceOrderRecused("os-1");
+
+		verify(budgetRepository).save(org.mockito.ArgumentMatchers
+				.argThat(b -> b != null && b.getStatus() == BudgetStatus.REJECTED));
+	}
+
+	@Test
+	@DisplayName("Não deve salvar de novo um orçamento que já está REJECTED")
+	void naoDeveSalvarOrcamentoJaRejected() {
+		when(paymentRepository.findByOrderId("os-1")).thenReturn(Optional.empty());
+		Budget budget = Budget.builder()
+				.id(UUID.randomUUID())
+				.orderId("os-1")
+				.status(BudgetStatus.REJECTED)
+				.build();
+		when(budgetRepository.findByOrderId("os-1")).thenReturn(Optional.of(budget));
+
+		paymentService().handleServiceOrderRecused("os-1");
+
+		verify(budgetRepository, org.mockito.Mockito.never()).save(any());
 	}
 
 	private static Payment argThatStatusIs(PaymentStatus status) {

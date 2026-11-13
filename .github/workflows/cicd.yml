@@ -81,10 +81,14 @@ jobs:
       contents: read
       packages: write
     outputs:
-      image_tag: ${{ steps.meta.outputs.version }}
+      image_tag: sha-${{ steps.short_sha.outputs.sha }}
     steps:
       - name: Checkout do código
         uses: actions/checkout@v4
+
+      - name: Resolver SHA curto do commit
+        id: short_sha
+        run: echo "sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
       - name: Login no GitHub Container Registry
         uses: docker/login-action@v3
@@ -232,6 +236,16 @@ jobs:
             echo "| 🌐 **Webhook Mercado Pago** | \`http://$ENDPOINT/api/v1/payments/webhook\` |" >> $GITHUB_STEP_SUMMARY
             echo "| 📚 **Swagger UI** | [Abrir Swagger](http://$ENDPOINT/swagger-ui.html) |" >> $GITHUB_STEP_SUMMARY
             echo "| ❤️ **Health Check** | [Ver Status](http://$ENDPOINT/actuator/health) |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            # O LoadBalancer so muda de hostname se o Service for recriado do zero (ex: destroy
+            # completo do cluster) - deploy normal mantem a mesma URL. Mas quando muda, o
+            # Mercado Pago nao avisa, so para de notificar silenciosamente - por isso o alerta
+            # bem visivel toda vez, em vez de confiar que alguem vai lembrar.
+            echo "> [!WARNING]" >> $GITHUB_STEP_SUMMARY
+            echo "> **Confira se a URL do webhook no painel do Mercado Pago bate com essa:**" >> $GITHUB_STEP_SUMMARY
+            echo "> \`http://$ENDPOINT/api/v1/payments/webhook\`" >> $GITHUB_STEP_SUMMARY
+            echo "> " >> $GITHUB_STEP_SUMMARY
+            echo "> Developers → officyna-billing → Configuração de webhooks → URL de teste. Se o Load Balancer foi recriado (ex: destroy completo do cluster), essa URL muda e o Mercado Pago para de notificar sem avisar ninguem." >> $GITHUB_STEP_SUMMARY
           fi
 
       - name: Diagnóstico em caso de falha

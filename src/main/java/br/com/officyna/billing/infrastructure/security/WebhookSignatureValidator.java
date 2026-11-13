@@ -1,6 +1,8 @@
 package br.com.officyna.billing.infrastructure.security;
 
 import br.com.officyna.billing.infrastructure.config.MercadoPagoProperties;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import javax.crypto.Mac;
@@ -13,14 +15,14 @@ import java.util.regex.Pattern;
 
 /**
  * Validates the x-signature header Mercado Pago sends on webhook calls.
- * Manifest template: "id:{data.id};request-id:{x-request-id};ts:{ts};" — data.id is used
- * verbatim, as it appears in the {@code data.id} query parameter MP appends to the webhook
- * URL (confirmed against a real signed request; MP's own docs claim it should be lowercased,
- * which does not match observed behavior for Orders API order ids).
+ * Manifest template: "id:{data.id};request-id:{x-request-id};ts:{ts};" — data.id entra em
+ * minusculo, conforme a documentacao do MP (confirmado contra uma entrega real de webhook do
+ * topico "Order": o id vem em maiuscula na URL, mas o HMAC foi assinado com ele em minusculo).
  */
 @Component
 public class WebhookSignatureValidator {
 
+	private static final Logger log = LoggerFactory.getLogger(WebhookSignatureValidator.class);
 	private static final String HMAC_ALGORITHM = "HmacSHA256";
 	private static final Pattern SIGNATURE_PART = Pattern.compile("(ts|v1)=([^,]+)");
 
@@ -40,9 +42,15 @@ public class WebhookSignatureValidator {
 		if (ts == null || v1 == null) {
 			return false;
 		}
-		String manifest = "id:" + dataId + ";request-id:" + xRequestId + ";ts:" + ts + ";";
+		String manifest = "id:" + dataId.toLowerCase() + ";request-id:" + xRequestId + ";ts:" + ts + ";";
 		String computed = hmacSha256Hex(manifest, webhookSecret);
-		return computed.equalsIgnoreCase(v1);
+		boolean valid = computed.equalsIgnoreCase(v1);
+
+		if (!valid) {
+			log.warn("Assinatura invalida. dataId={} ts={} v1Recebido={} v1Calculado={}", dataId, ts, v1, computed);
+		}
+
+		return valid;
 	}
 
 	private Map<String, String> parseSignatureHeader(String xSignature) {
