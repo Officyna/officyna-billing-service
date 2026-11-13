@@ -1,6 +1,8 @@
 package br.com.officyna.billing.infrastructure.security;
 
 import br.com.officyna.billing.infrastructure.config.MercadoPagoProperties;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import javax.crypto.Mac;
@@ -21,6 +23,7 @@ import java.util.regex.Pattern;
 @Component
 public class WebhookSignatureValidator {
 
+	private static final Logger log = LoggerFactory.getLogger(WebhookSignatureValidator.class);
 	private static final String HMAC_ALGORITHM = "HmacSHA256";
 	private static final Pattern SIGNATURE_PART = Pattern.compile("(ts|v1)=([^,]+)");
 
@@ -42,7 +45,16 @@ public class WebhookSignatureValidator {
 		}
 		String manifest = "id:" + dataId + ";request-id:" + xRequestId + ";ts:" + ts + ";";
 		String computed = hmacSha256Hex(manifest, webhookSecret);
-		return computed.equalsIgnoreCase(v1);
+		boolean valid = computed.equalsIgnoreCase(v1);
+
+		if (!valid) {
+			String manifestLowercase = "id:" + dataId.toLowerCase() + ";request-id:" + xRequestId + ";ts:" + ts + ";";
+			String computedLowercase = hmacSha256Hex(manifestLowercase, webhookSecret);
+			log.warn("Assinatura invalida. dataId={} ts={} v1Recebido={} v1CalculadoVerbatim={} v1CalculadoLowercase={} bateuComLowercase={}",
+					dataId, ts, v1, computed, computedLowercase, computedLowercase.equalsIgnoreCase(v1));
+		}
+
+		return valid;
 	}
 
 	private Map<String, String> parseSignatureHeader(String xSignature) {
