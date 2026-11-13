@@ -15,10 +15,9 @@ import java.util.regex.Pattern;
 
 /**
  * Validates the x-signature header Mercado Pago sends on webhook calls.
- * Manifest template: "id:{data.id};request-id:{x-request-id};ts:{ts};" — data.id is used
- * verbatim, as it appears in the {@code data.id} query parameter MP appends to the webhook
- * URL (confirmed against a real signed request; MP's own docs claim it should be lowercased,
- * which does not match observed behavior for Orders API order ids).
+ * Manifest template: "id:{data.id};request-id:{x-request-id};ts:{ts};" — data.id entra em
+ * minusculo, conforme a documentacao do MP (confirmado contra uma entrega real de webhook do
+ * topico "Order": o id vem em maiuscula na URL, mas o HMAC foi assinado com ele em minusculo).
  */
 @Component
 public class WebhookSignatureValidator {
@@ -43,15 +42,12 @@ public class WebhookSignatureValidator {
 		if (ts == null || v1 == null) {
 			return false;
 		}
-		String manifest = "id:" + dataId + ";request-id:" + xRequestId + ";ts:" + ts + ";";
+		String manifest = "id:" + dataId.toLowerCase() + ";request-id:" + xRequestId + ";ts:" + ts + ";";
 		String computed = hmacSha256Hex(manifest, webhookSecret);
 		boolean valid = computed.equalsIgnoreCase(v1);
 
 		if (!valid) {
-			String manifestLowercase = "id:" + dataId.toLowerCase() + ";request-id:" + xRequestId + ";ts:" + ts + ";";
-			String computedLowercase = hmacSha256Hex(manifestLowercase, webhookSecret);
-			log.warn("Assinatura invalida. dataId={} ts={} v1Recebido={} v1CalculadoVerbatim={} v1CalculadoLowercase={} bateuComLowercase={}",
-					dataId, ts, v1, computed, computedLowercase, computedLowercase.equalsIgnoreCase(v1));
+			log.warn("Assinatura invalida. dataId={} ts={} v1Recebido={} v1Calculado={}", dataId, ts, v1, computed);
 		}
 
 		return valid;
