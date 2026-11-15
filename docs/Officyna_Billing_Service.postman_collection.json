@@ -1,0 +1,84 @@
+{
+	"info": {
+		"name": "Officyna Billing Service",
+		"description": "Microsserviço financeiro e de pagamentos da Officyna — checkout (Pix/cartão) via Mercado Pago Orders API e webhook de confirmação de pagamento.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{ "key": "baseUrl", "value": "http://localhost:8086" }
+	],
+	"item": [
+		{
+			"name": "Health Check",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{baseUrl}}/actuator/health",
+					"host": [ "{{baseUrl}}" ],
+					"path": [ "actuator", "health" ]
+				}
+			}
+		},
+		{
+			"name": "Checkout - Criar cobrança Pix",
+			"request": {
+				"method": "POST",
+				"header": [
+					{ "key": "Content-Type", "value": "application/json" }
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"correlationId\": \"a1b2c3d4-e5f6-7890-1234-56789abcdef0\",\n  \"serviceOrderId\": \"6724a1b8e4b0123456789abc\",\n  \"paymentMethod\": \"PIX\",\n  \"payerEmail\": \"test_user_123@testuser.com\",\n  \"approvedLabors\": [\n    { \"laborId\": \"lab_1\", \"amount\": 150.00 }\n  ],\n  \"approvedSupplies\": [\n    { \"supplyId\": \"sup_1\", \"amount\": 180.00 }\n  ]\n}"
+				},
+				"url": {
+					"raw": "{{baseUrl}}/api/v1/checkout/create",
+					"host": [ "{{baseUrl}}" ],
+					"path": [ "api", "v1", "checkout", "create" ]
+				}
+			}
+		},
+		{
+			"name": "Checkout - Criar cobrança Cartão",
+			"request": {
+				"method": "POST",
+				"header": [
+					{ "key": "Content-Type", "value": "application/json" }
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"correlationId\": \"a1b2c3d4-e5f6-7890-1234-56789abcdef0\",\n  \"serviceOrderId\": \"6724a1b8e4b0123456789abc\",\n  \"paymentMethod\": \"CREDIT_CARD\",\n  \"payerEmail\": \"test_user_123@testuser.com\",\n  \"approvedLabors\": [\n    { \"laborId\": \"lab_1\", \"amount\": 150.00 }\n  ],\n  \"approvedSupplies\": [\n    { \"supplyId\": \"sup_1\", \"amount\": 180.00 }\n  ],\n  \"cardToken\": \"<token gerado via POST /v1/card_tokens do Mercado Pago>\",\n  \"cardBrand\": \"master\",\n  \"installments\": 1\n}"
+				},
+				"url": {
+					"raw": "{{baseUrl}}/api/v1/checkout/create",
+					"host": [ "{{baseUrl}}" ],
+					"path": [ "api", "v1", "checkout", "create" ]
+				}
+			}
+		},
+		{
+			"name": "Webhook - Notificação Mercado Pago",
+			"request": {
+				"method": "POST",
+				"header": [
+					{ "key": "Content-Type", "value": "application/json" },
+					{ "key": "x-signature", "value": "ts=1700000000,v1=<hmac calculado>" },
+					{ "key": "x-request-id", "value": "sim-req-001" }
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"type\": \"payment\",\n  \"action\": \"order.updated\",\n  \"data\": { \"id\": \"<order id>\" }\n}"
+				},
+				"url": {
+					"raw": "{{baseUrl}}/api/v1/payments/webhook?data.id=<order id>&type=payment",
+					"host": [ "{{baseUrl}}" ],
+					"path": [ "api", "v1", "payments", "webhook" ],
+					"query": [
+						{ "key": "data.id", "value": "<order id>" },
+						{ "key": "type", "value": "payment" }
+					]
+				}
+			}
+		}
+	]
+}

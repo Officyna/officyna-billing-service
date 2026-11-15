@@ -57,7 +57,12 @@ init-sqs.sh` cria as filas/tópico, mais uma fila de teste inscrita no tópico p
 localmente) e a aplicação em `http://localhost:8086` (porta do host; o container escuta 8080 —
 8086 é só pra não colidir com outra coisa já usando 8080 na sua máquina, ajuste à vontade).
 
-Swagger UI em `http://localhost:8086/swagger-ui.html`. Health check em `/actuator/health`.
+Health check em `/actuator/health`.
+
+### Acesso à Documentação da API
+* **Swagger UI Local:** `http://localhost:8086/swagger-ui.html`
+* **Swagger UI no K8s:** `https://{dns-elb}.us-east-1.elb.amazonaws.com/swagger-ui/index.html`
+* **Collection Postman**: [docs/Officyna_Billing_Service](docs/Officyna_Billing_Service.postman_collection.json)
 
 ### Testar a mensageria manualmente
 
@@ -157,6 +162,12 @@ docker run --rm -v "$PWD":/app -w /app -v maven-repo-cache:/root/.m2 \
 Testes unitários (JUnit 5 + Mockito) cobrindo o cálculo de orçamento/impostos, a aprovação de
 itens, os gateways de persistência e o fluxo de webhook. Gate do Jacoco em 80% de cobertura de
 linha (exclui camadas finas: `api`, `config`, `messaging`, entidades JPA).
+
+### Cobertura (SonarCloud)
+
+**[Sonar — officyna-billing-service](https://sonarcloud.io/project/overview?id=officyna-billing-service)**
+
+![Evidência de cobertura no SonarCloud](docs/images/sonarcloud-coverage.png)
 
 ## Pontos em aberto
 
